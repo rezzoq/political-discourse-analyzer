@@ -1,0 +1,29 @@
+# ── Classification Service ───────────────────────────────────────────────────
+# Runs the FastAPI NLP server (classifier_server.py)
+# Model facebook/bart-large-mnli is downloaded on first start (~1.6 GB)
+# and cached in a Docker volume so subsequent starts are fast.
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# System deps
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Python deps — install before copying code for better layer caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY classifier_server.py .
+
+# Hugging Face model cache will be mounted as a volume
+ENV HF_HOME=/app/.cache/huggingface
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=5 --start-period=120s \
+  CMD curl -f http://localhost:8000/health || exit 1
+
+CMD ["uvicorn", "classifier_server:app", "--host", "0.0.0.0", "--port", "8000"]

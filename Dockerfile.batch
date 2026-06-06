@@ -1,0 +1,32 @@
+# ── Batch Analysis Runner ────────────────────────────────────────────────────
+# Runs the Python analysis pipeline:
+#   11_read_save_data.py → 12_fill_model.py → 13_fill_value.py → 14_fill_rhetoric.py
+# Then generates visualizations.
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY python/ ./python/
+
+# Default: run the full Baerbock pipeline then visualize
+# Override CMD to run Scholz: docker compose run batch-runner python python/scholz/11_read_save_data.py
+CMD ["sh", "-c", "\
+  echo 'Step 1: Loading data from DB...' && \
+  python python/berbok/11_read_save_data.py && \
+  echo 'Step 2: Running zero-shot classification...' && \
+  python python/berbok/12_fill_model.py && \
+  echo 'Step 3: Value analysis...' && \
+  python python/berbok/13_fill_value.py && \
+  echo 'Step 4: Rhetoric features...' && \
+  python python/berbok/14_fill_rhetoric.py && \
+  echo 'Step 5: Generating visualizations...' && \
+  python python/visual/visual_baerbock.py && \
+  echo 'Done. Charts saved to /app/output/'"]

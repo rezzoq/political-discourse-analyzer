@@ -1,0 +1,80 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Political Discourse Analyzer — full stack
+#
+# Services:
+#   postgres         — stores scraped statements and analysis results
+#   classifier       — FastAPI server wrapping BART-MNLI (NLP inference)
+#   batch-runner     — runs the Python analysis pipeline on demand
+#
+# Usage:
+#   docker compose up -d postgres classifier   # start infrastructure
+#   docker compose run --rm batch-runner       # run analysis pipeline once
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: nir-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${DB_NAME:-news_db}
+      POSTGRES_USER:     ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-news_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  classifier:
+    build:
+      context: .
+      dockerfile: Dockerfile.classifier
+    container_name: nir-classifier
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - hf_cache:/app/.cache/huggingface   # cache model between restarts
+    environment:
+      HF_HOME: /app/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s     # model download takes time on first run
+
+  batch-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.batch
+    container_name: nir-batch
+    environment:
+      DB_HOST:       postgres
+      DB_PORT:       5432
+      DB_NAME:       ${DB_NAME:-news_db}
+      DB_USER:       ${DB_USER:-postgres}
+      DB_PASSWORD:   ${DB_PASSWORD}
+      CLASSIFIER_URL: http://classifier:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      classifier:
+        condition: service_healthy
+    volumes:
+      - ./python:/app/python       # mount pipeline scripts
+      - ./output:/app/output       # charts saved here
+    profiles:
+      - run   # only starts with: docker compose --profile run up batch-runner
+
+volumes:
+  postgres_data:
+  hf_cache:
